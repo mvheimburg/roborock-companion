@@ -8,6 +8,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import callback
@@ -18,6 +19,10 @@ from homeassistant.util import dt as dt_util
 
 class AdapterError(ValueError):
     """Stable error at the official integration boundary."""
+
+
+class UnconfirmedError(AdapterError):
+    """A physical operation may have completed but needs reconciliation."""
 
 
 class RoborockAdapter:
@@ -121,6 +126,7 @@ class RoborockAdapter:
             state
             and state.state not in ("unknown", "unavailable")
             and self.coordinator.device.is_connected
+            and getattr(self.coordinator, "last_update_success", True)
         )
 
     async def async_command(self, method: str, params=None):
@@ -142,6 +148,59 @@ class RoborockAdapter:
     def get_snapshot(self):
         available = self.available
         state = self.hass.states.get(self.entity_id)
+        from .capabilities import capabilities
+        from .map_geometry import convert_map
+        from .settings import get_settings
+
+        base_url = str(self.entry.data.get("base_url", "")) if self.entry else ""
+        host = urlparse(base_url).hostname or ""
+        server_kind = (
+            "roborock_cloud"
+            if host.endswith(".roborock.com")
+            else "custom_server"
+            if host
+            else "unknown"
+        )
+        maps, current_map = [], None
+        if available:
+            api = self.coordinator.properties_api
+            home = getattr(api, "home", None)
+            current_map = getattr(getattr(api, "maps", None), "current_map", None)
+            for map_id, info in list((getattr(home, "home_map_info", None) or {}).items())[:16]:
+                content = (getattr(home, "home_map_content", None) or {}).get(map_id)
+                # The current map trait can be newer than the home cache after explicit refresh.
+                live = getattr(api, "map_content", None)
+                if map_id == current_map and getattr(live, "map_data", None):
+                    content = live
+                try:
+                    item = convert_map(map_id, info, content)
+                except AttributeError, TypeError, ValueError, OverflowError:
+                    item = {
+                        "id": map_id,
+                        "name": info.name,
+                        "rooms": [],
+                        "calibration": None,
+                        "edit_blocker": "geometry_unavailable",
+                        "preservation_complete": False,
+                    }
+                image = getattr(content, "image_content", None)
+                image_version = (
+                    hashlib.sha256(image).hexdigest()[:16]
+                    if isinstance(image, bytes)
+                    else "missing"
+                )
+                item["image_url"] = (
+                    f"/api/roborock_companion/map/{self.entity_id}/{map_id}?v={image_version}"
+                )
+                item["active"] = map_id == current_map
+                names = getattr(getattr(self, "companion_entry", None), "options", {}).get(
+                    "room_names", {}
+                )
+                for room in item["rooms"]:
+                    alias = names.get(f"{map_id}:{room['id']}")
+                    if alias:
+                        room["name"] = alias
+                maps.append(item)
         data = {
             "api_version": 1,
             "entity_id": self.entity_id,
@@ -151,12 +210,14 @@ class RoborockAdapter:
             "connection": {
                 "local_available": bool(available and self.coordinator.device.is_local_connected),
                 "command_transport": "ha_managed",
-                "maps_transport": "cloud",
+                "maps_transport": "configured_server",
+                "server_kind": server_kind,
             },
-            "maps": [],
-            "settings": [],
+            "maps": maps,
+            "current_map": current_map,
+            "settings": get_settings(self) if available else [],
             "schedules": [],
-            "capabilities": {},
+            "capabilities": capabilities(self, maps),
         } | self.extra
         content = json.dumps(data, sort_keys=True, default=str)
         data["revision"] = hashlib.sha256(content.encode()).hexdigest()[:20]

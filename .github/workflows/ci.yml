@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: pip install -r requirements_test.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix frontend
+      - run: npx --prefix frontend playwright install --with-deps chromium
+      - run: npm test --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm run typecheck --prefix frontend
+      - run: npm run format:check --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: git diff --exit-code -- custom_components/roborock_companion/frontend
+      - run: python -m pytest -q
+      - run: ruff check custom_components tests
+      - run: ruff format --check custom_components tests
+      - name: Check version
+        run: python -c "import json,tomllib; assert tomllib.load(open('pyproject.toml','rb'))['project']['version'] == json.load(open('custom_components/roborock_companion/manifest.json'))['version']"
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration

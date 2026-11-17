@@ -4,7 +4,7 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from .test_adapter import add_robot
+from .helpers import add_robot
 
 
 async def test_setup_and_cancel_options_keep_binding(hass):

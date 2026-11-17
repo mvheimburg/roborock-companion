@@ -1,0 +1,6 @@
+{
+  "name": "Roborock Companion",
+  "homeassistant": "2026.11.1",
+  "zip_release": true,
+  "filename": "roborock_companion.zip"
+}

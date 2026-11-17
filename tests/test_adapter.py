@@ -2,38 +2,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.roborock_companion.adapter import AdapterError, RoborockAdapter
 
-
-def add_robot(hass, entry, suffix, command=None):
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={("roborock", suffix)},
-        name=suffix,
-    )
-    entity = er.async_get(hass).async_get_or_create(
-        "vacuum",
-        "roborock",
-        suffix,
-        device_id=device.id,
-        config_entry=entry,
-        suggested_object_id=suffix,
-    )
-    hass.states.async_set(entity.entity_id, "docked")
-    coordinator = SimpleNamespace(
-        duid=suffix,
-        device=SimpleNamespace(is_local_connected=True, is_connected=True),
-        device_info={"identifiers": {("roborock", suffix)}},
-        properties_api=SimpleNamespace(
-            command=SimpleNamespace(send=command or AsyncMock(return_value=["ok"]))
-        ),
-        async_add_listener=lambda callback: lambda: None,
-    )
-    return entity.entity_id, coordinator
+from .helpers import add_robot
 
 
 async def test_resolves_second_robot_without_copying_connection(hass):
@@ -104,4 +77,12 @@ async def test_official_unload_makes_cached_data_unavailable(hass):
     await hass.async_block_till_done()
     assert not adapter.get_snapshot()["available"]
     with pytest.raises(AdapterError):
+        await adapter.async_command("get_timer", [])
+
+
+async def test_failed_coordinator_blocks_actions_on_retained_state(hass, adapter):
+    adapter.coordinator.last_update_success = False
+    assert hass.states.get(adapter.entity_id).state == "docked"
+    assert adapter.get_snapshot()["available"] is False
+    with pytest.raises(AdapterError, match="unavailable"):
         await adapter.async_command("get_timer", [])

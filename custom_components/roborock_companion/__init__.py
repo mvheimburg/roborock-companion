@@ -11,6 +11,9 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 async def async_setup(hass, config):
     hass.data.setdefault(DOMAIN, {})
+    from .websocket import async_register
+
+    async_register(hass)
     return True
 
 
@@ -20,8 +23,12 @@ async def async_setup_entry(hass, entry):
         await adapter.async_bind()
     except AdapterError as err:
         raise ConfigEntryNotReady(str(err)) from err
+    adapter.companion_entry = entry
     entry.runtime_data = adapter
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = adapter
+    from . import panel
+
+    await panel.async_register(hass)
     return True
 
 
@@ -29,4 +36,8 @@ async def async_unload_entry(hass, entry):
     adapter = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if adapter:
         await adapter.async_close()
+    if not hass.data.get(DOMAIN):
+        from . import panel
+
+        panel.async_unregister(hass)
     return True

@@ -1,0 +1,34 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": [
+    "frontend/src"
+  ],
+  "locale": "en-GB",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": [
+    "Select/Listbox",
+    "Form",
+    "Scrollbar",
+    "Toast",
+    "CRUD"
+  ],
+  "ownership": {
+    "Select/Listbox": "native"
+  },
+  "requiredCommands": [
+    "unit",
+    "typecheck",
+    "lint",
+    "build"
+  ],
+  "commands": {
+    "unit": "npm test --prefix frontend",
+    "typecheck": "npm run typecheck --prefix frontend",
+    "lint": "npm run lint --prefix frontend",
+    "build": "npm run build --prefix frontend"
+  },
+  "evidence": {
+    "crudFullFlow": "frontend/tests/panel.test.ts",
+    "failurePaths": "frontend/tests/panel.test.ts"
+  }
+}
