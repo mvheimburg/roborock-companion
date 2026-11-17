@@ -70,6 +70,8 @@ class Operations:
                 "history_read",
                 "map_refresh",
                 "room_display_save",
+                "map_goto",
+                "map_zone_clean",
             }
             | map_operations
         ):
@@ -84,7 +86,13 @@ class Operations:
         try:
             async with self.lock, asyncio.timeout(30):
                 self.adapter.ensure_current()
-                if operation == "room_display_save":
+                if operation in ("map_goto", "map_zone_clean"):
+                    from .map_operations import async_coordinate_action
+
+                    result = await async_coordinate_action(
+                        self, operation, params, request_id, completed
+                    )
+                elif operation == "room_display_save":
                     if set(params) != {"map_id", "room_id", "name"}:
                         raise AdapterError("invalid_request")
                     current = self.adapter.get_snapshot()

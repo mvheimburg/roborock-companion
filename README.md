@@ -41,15 +41,24 @@ entity-backed robot/dock settings, HA room display names, floor/map views,
 coordinate input and supported map tools. It preserves user-defined names and
 never renames existing HA entity IDs. Room display names are local aliases in
 this companion, not a claim that the robot/cloud room registry was renamed.
-The integration creates no additional measurement entities.
+The integration creates no additional measurement entities. Binding follows the
+entity registry identity through ordinary renames and persists the device identity;
+reassigning that entity to another device fails closed. Re-add the companion to
+choose a replacement robot.
+
+Unconfirmed requests keep writes disabled until an explicit read-only Refresh.
+Cancel discards a draft without clearing operation uncertainty. Other successful
+operations preserve unrelated drafts; partial settings saves retain the fields
+that still differ from HA.
 
 | Function | Current behavior |
 | --- | --- |
-| Existing robot/dock settings | Structured controls use the official integration's switch/select/number/time entities. Enable relevant disabled entities in HA first. |
+| Existing robot/dock settings | Structured controls use the official integration's switch/select/number/time entities and button actions. Enable relevant disabled entities in HA first. |
 | Room selection and map view | Existing parser data, real image calibration, authenticated image endpoint, zoom and coordinate tools. |
-| Room split/merge and floor material | Enabled only for reported device features, current floor, idle robot and valid inputs. Command completion requires readback; ambiguous replies remain unconfirmed. |
-| Walls and no-go zones | Only when one saved map and a bounded audit prove the existing restriction set can be preserved. Unknown blocks/no-mop restrictions block replacement. |
-| Map backup/restore and mapping | Reported-feature gates and explicit confirmation. These may remain unconfirmed when the API lacks useful readback. |
+| Room split/merge and floor material | Disabled in this initial release: no exact model/firmware command profile has been verified. Feature bits alone never enable physical map writes. |
+| Walls and no-go zones | Disabled until an exact command profile is verified. The preservation audit additionally rejects duplicate blocks, unknown layouts, flags, truncation and unmodeled restrictions. |
+| Map backup/restore and mapping | Disabled until model/firmware command evidence is verified. No experimental bypass is exposed. |
+| Go-to point and zone cleaning | Public HA actions through the companion, checked against a map revision; available only for a single saved map with calibrated geometry. Dispatch is not reported as physical completion. |
 | Cleaning-session history | Bounded on-demand reads through the existing connection; independent of recorder charts. |
 | Schedules | The panel opens HA's standard automation editor. The upstream server documents incomplete native timer support; native schedule CRUD is not advertised. No browser scheduler is used. |
 | Carpets, thresholds, map deletion/rename, SmartPlan, per-room cleaning order and manual driving | Not enabled until protocol/readback/model support is verified. These are limitations, not completed parity claims. |
@@ -57,7 +66,8 @@ The integration creates no additional measurement entities.
 
 The Saros 20 Sonic 02.58.82 report confirms upstream local-server compatibility,
 not all advanced writes in this component. No owner's robot was operated during
-implementation. The adapter deliberately fails closed when the official HA
+implementation. The shipped exact-protocol profile table is empty. These map-writing tools are
+implementation groundwork, not usable Saros features yet. The adapter deliberately fails closed when the official HA
 runtime, geometry or firmware capability cannot be identified safely.
 
 ## Local and cloud traffic

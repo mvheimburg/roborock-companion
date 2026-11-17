@@ -11,6 +11,8 @@ const en = {
   failed: "The request failed. Check the connection and try again.",
   pending: "Waiting for Home Assistant…",
   confirmed: "Changes confirmed",
+  remaining: "Still unsaved:",
+  reconciled: "Current state reloaded. Review the draft before saving.",
   unconfirmed:
     "Request sent; the robot has not confirmed the change. Refresh before trying again.",
   settings: "Robot and dock",
@@ -151,6 +153,9 @@ const nb: Dictionary = {
   failed: "Forespørselen mislyktes. Kontroller forbindelsen og prøv igjen.",
   pending: "Venter på Home Assistant…",
   confirmed: "Endringene er bekreftet",
+  remaining: "Ikke lagret:",
+  reconciled:
+    "Gjeldende tilstand er hentet. Kontroller utkastet før du lagrer.",
   unconfirmed:
     "Forespørselen er sendt, men roboten har ikke bekreftet endringen. Oppdater før du prøver igjen.",
   settings: "Robot og dokk",
@@ -303,15 +308,17 @@ export function number(hass: Hass | undefined, value: number, digits = 1) {
   if (!Number.isFinite(value)) return strings(hass).unknown;
   const preference = hass?.locale?.number_format;
   const target =
-    preference === "comma_decimal"
+    preference === "decimal_comma"
       ? "de"
-      : preference === "decimal_period"
+      : preference === "comma_decimal" || preference === "none"
         ? "en-US"
-        : preference === "space_comma"
-          ? "fr"
-          : preference === "system"
-            ? undefined
-            : locale(hass);
+        : preference === "quote_decimal"
+          ? "de-CH"
+          : preference === "space_comma"
+            ? "fr"
+            : preference === "system"
+              ? undefined
+              : locale(hass);
   return new Intl.NumberFormat(target, {
     useGrouping: preference !== "none",
     maximumFractionDigits: digits,

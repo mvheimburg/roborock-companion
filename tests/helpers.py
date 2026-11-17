@@ -22,6 +22,7 @@ def add_robot(hass, entry, suffix, command=None):
     hass.states.async_set(entity.entity_id, "docked")
     coordinator = SimpleNamespace(
         duid=suffix,
+        duid_slug=suffix,
         device=SimpleNamespace(is_local_connected=True, is_connected=True),
         device_info={"identifiers": {("roborock", suffix)}},
         properties_api=SimpleNamespace(

@@ -53,6 +53,8 @@ def convert_map(map_id, info, content):
     audit = audit_map(getattr(content, "raw_api_response", None))
     complete = bool(
         calibration
+        and len(getattr(data, "walls", None) or []) <= 128
+        and len(getattr(data, "no_go_areas", None) or []) <= 128
         and audit["blocker"] is None
         and audit["counts"].get(9, 0) == len(getattr(data, "no_go_areas", None) or [])
         and audit["counts"].get(10, 0) == len(getattr(data, "walls", None) or [])

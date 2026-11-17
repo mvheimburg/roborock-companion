@@ -1,6 +1,6 @@
 # Roborock Companion API v1
 
-All requests use the authenticated HA websocket. `list`, `snapshot` and `subscribe` enforce robot read permission. `execute` additionally requires an administrator. Image GET `/api/roborock_companion/map/{entity_id}/{map_id}` requires authentication and the same robot permission.
+All requests use the authenticated HA websocket. `list`, `snapshot` and `subscribe` enforce robot read permission. `execute` additionally requires an administrator. Image GET `/api/roborock_companion/map/{entity_id}/{map_id}?v=<snapshot image hash>` requires authentication and the same robot permission.
 
 - `roborock_companion/list` returns `{api_version:1, robots:[{entity_id,name,available}]}`.
 - `roborock_companion/snapshot` with `entity_id` returns the current snapshot.
@@ -18,3 +18,22 @@ Wall/no-go replacement is limited to a single saved map whose bounded header aud
 `connection.local_available` reports a direct local socket. `command_transport:ha_managed` makes no per-command routing claim. `server_kind` distinguishes `roborock_cloud`, `custom_server` and `unknown`; custom does not itself prove LAN reachability. The integration's configured server handles MQTT/map requests.
 
 The companion uses the official integration's private runtime behind one compatibility adapter. It never accepts arbitrary RPC method names or client-supplied device IDs. Entry reload/removal invalidates old results. Standard public HA actions remain independent of this API.
+
+Image versions are enforced: a missing or mismatched version returns HTTP 409,
+never a newer image with an older calibration. Snapshots use floor-keyed cache
+content; shared live bytes are used only after a guarded single-floor observation.
+
+`map_goto` (`map_id,x,y`) and `map_zone_clean`
+(`map_id,x1,y1,x2,y2,repeats`, repeats 1–3) call public HA actions, require one
+saved map, valid calibration and the current revision. They return unconfirmed
+after dispatch because the physical motion is not observed to completion.
+Settings may include `kind:button`; these are immediate public `button.press`
+actions, never values accepted by `settings_save`. Room cleaning uses public
+`vacuum.clean_segments` with `segment_ids:["<map_id>_<room_id>"]`.
+
+Physical map-writing operations additionally require an exact model/firmware
+protocol profile. **No profiles ship in 0.1.0**, so these writes are disabled.
+Future verified profiles must still pass fresh status/map checks before and after
+opening an edit session, lossless-preservation checks, and cleanup acknowledgement.
+The captured bulk replacement path is restricted to a single map at index 0.
+Split/merge room counts are insufficient confirmation and remain unconfirmed.

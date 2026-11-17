@@ -64,7 +64,7 @@ export interface MapSnapshot {
 }
 export interface Setting {
   entity_id: string;
-  kind: "switch" | "select" | "number" | "time";
+  kind: "switch" | "select" | "number" | "time" | "button";
   name: string;
   value: unknown;
   available: boolean;

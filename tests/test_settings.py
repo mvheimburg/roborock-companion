@@ -88,3 +88,17 @@ async def test_partial_settings_save_reports_completed_steps(hass, adapter):
     assert result["completed_steps"] == [a]
     assert hass.states.get(a).state == "deep"
     assert hass.states.get(b).state == "standard"
+
+
+async def test_official_button_is_an_action_not_a_saved_setting(hass, adapter):
+    entity_id = setting(hass, adapter, "empty", "button", "unknown", {"friendly_name": "Empty bin"})
+    field = next((f for f in get_settings(adapter) if f["entity_id"] == entity_id), None)
+    assert field is not None and field["kind"] == "button" and field["available"]
+    result = await Operations(adapter).async_execute(
+        "settings_save",
+        {"changes": [{"entity_id": entity_id, "value": True}]},
+        adapter.get_snapshot()["revision"],
+        "button_invalid",
+        is_admin=True,
+    )
+    assert result["error"] == "invalid_setting"

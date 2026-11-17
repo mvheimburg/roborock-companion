@@ -1,6 +1,7 @@
 """Bounded extra reads; normal state stays owned by HA's coordinator."""
 
 from time import monotonic
+from types import SimpleNamespace
 
 from .adapter import AdapterError
 
@@ -11,11 +12,31 @@ async def async_refresh_map(adapter):
         raise AdapterError("rate_limited")
     adapter._map_request_time = monotonic()
     api = adapter.coordinator.properties_api
+    before = adapter.get_snapshot()
+    generation = adapter.generation
     # Refresh the current map only: HomeTrait.refresh may discover/switch floors.
     if not getattr(api, "map_content", None):
         raise AdapterError("geometry_unavailable")
     await api.map_content.refresh()
     adapter.ensure_current()
+    after = adapter.get_snapshot()
+    if (
+        generation == adapter.generation
+        and len(before["maps"]) == 1
+        and len(after["maps"]) == 1
+        and before["current_map"] == after["current_map"]
+        and after["state"] in ("idle", "docked")
+    ):
+        live = api.map_content
+        adapter._verified_live = (
+            generation,
+            after["current_map"],
+            SimpleNamespace(
+                map_data=live.map_data,
+                image_content=live.image_content,
+                raw_api_response=live.raw_api_response,
+            ),
+        )
     adapter._notify()
 
 

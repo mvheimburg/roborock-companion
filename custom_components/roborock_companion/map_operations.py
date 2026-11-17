@@ -86,6 +86,7 @@ async def async_map_operation(ops, operation, params, request_id, completed):
         method, data = "app_start_build_map", []
     else:
         raise AdapterError("unsupported_operation")
+    revision = before["revision"]
     generation = adapter.generation
     editing = method in (
         "save_map",
@@ -93,16 +94,48 @@ async def async_map_operation(ops, operation, params, request_id, completed):
         "merge_segment",
         "set_segment_ground_material",
     )
-    retry_format = getattr(
-        adapter.coordinator.properties_api.device_features, "is_rpc_retry_supported", False
-    )
-    if editing and retry_format:
-        data = {"data": data, "need_retry": 1}
-    elif method == "set_segment_ground_material":
+    # Ground material has a method-specific envelope, independent of retry support.
+    if method == "set_segment_ground_material":
         data = {"data": data}
+    elif editing and (adapter.map_protocol or {}).get(operation) == "wrapped":
+        data = {"data": data, "need_retry": 1}
+
+    async def validate_current():
+        status = getattr(adapter.coordinator.properties_api, "status", None)
+        if not callable(getattr(status, "refresh", None)):
+            raise AdapterError("model_unverified")
+        api = adapter.coordinator.properties_api
+        await status.refresh()
+        await api.maps.refresh()
+        await api.map_content.refresh()
+        await status.refresh()
+        adapter.ensure_current()
+        fresh = adapter.get_snapshot()
+        saved = {m.map_flag for m in (getattr(api.maps, "map_info", None) or [])}
+        cached = adapter.map_content(target)
+        raw = getattr(cached, "raw_api_response", None)
+        if (
+            saved != {target}
+            or not isinstance(raw, bytes)
+            or raw != getattr(api.map_content, "raw_api_response", None)
+        ):
+            raise AdapterError("conflict")
+        if (
+            generation != adapter.generation
+            or fresh["revision"] != revision
+            or fresh["current_map"] != target
+            or len(fresh["maps"]) != 1
+            or fresh["state"] not in ("idle", "docked")
+            or getattr(getattr(status, "state", None), "name", None)
+            not in ("idle", "charging", "charging_complete")
+        ):
+            raise AdapterError("conflict")
+
+    await validate_current()
     opened = False
     try:
         if editing:
+            opened = True
             response = await adapter.async_command("start_edit_map", [])
             if response != ["ok"]:
                 return ops.result(request_id, "unconfirmed", error="edit_session_unconfirmed")
@@ -110,6 +143,7 @@ async def async_map_operation(ops, operation, params, request_id, completed):
         adapter.ensure_current()
         if generation != adapter.generation:
             raise AdapterError("binding_changed")
+        await validate_current()
         response = await adapter.async_command(method, data)
         completed.append(method)
         if response not in (["ok"], ["retry"], "ok"):
@@ -129,10 +163,8 @@ async def async_map_operation(ops, operation, params, request_id, completed):
             and _canonical(updated["walls"]) == _canonical(walls)
             and _canonical(updated["no_go"]) == _canonical(zones)
         )
-        if operation == "room_split" and updated:
-            confirmed = len(updated["rooms"]) > len(current["rooms"])
-        elif operation == "room_merge" and updated:
-            confirmed = len(updated["rooms"]) < len(current["rooms"])
+        # Room counts alone cannot establish which room was split or merged.
+        confirmed = confirmed and updated["preservation_complete"]
         return ops.result(
             request_id,
             "confirmed" if confirmed else "unconfirmed",
@@ -142,6 +174,39 @@ async def async_map_operation(ops, operation, params, request_id, completed):
     finally:
         if opened and adapter.generation == generation:
             try:
-                await adapter.async_command("end_edit_map", [])
+                async with asyncio.timeout(5):
+                    close = await adapter.async_command("end_edit_map", [])
+                if close not in (["ok"], "ok"):
+                    raise UnconfirmedError("edit_session_unconfirmed")
             except Exception as err:
                 raise UnconfirmedError("edit_session_unconfirmed") from err
+
+
+async def async_coordinate_action(ops, operation, params, request_id, completed):
+    adapter = ops.adapter
+    current = adapter.get_snapshot()
+    target = integer(params.get("map_id"), 0, 255)
+    if (
+        current["current_map"] != target
+        or current["capabilities"][operation]["status"] != "available"
+    ):
+        raise AdapterError("wrong_map_or_busy")
+    if operation == "map_goto":
+        if set(params) != {"map_id", "x", "y"}:
+            raise AdapterError("invalid_request")
+        service = "set_vacuum_goto_position"
+        data = {"x": integer(params["x"]), "y": integer(params["y"])}
+    else:
+        if set(params) != {"map_id", "x1", "y1", "x2", "y2", "repeats"}:
+            raise AdapterError("invalid_request")
+        service = "set_vacuum_zoned_cleaning"
+        data = {key: integer(params[key]) for key in ("x1", "y1", "x2", "y2")}
+        if data["x1"] >= data["x2"] or data["y1"] >= data["y2"]:
+            raise AdapterError("invalid_coordinates")
+        data["repeats"] = integer(params["repeats"], 1, 3)
+    await adapter.hass.services.async_call(
+        "roborock", service, data | {"entity_id": adapter.entity_id}, blocking=True
+    )
+    adapter.ensure_current()
+    completed.append(service)
+    return ops.result(request_id, "unconfirmed", error="readback_pending", completed=completed)

@@ -10,7 +10,15 @@ def map_bytes(*blocks):
     return (
         header
         + image
-        + b"".join(struct.pack("<HHI", kind, 8, len(body)) + body for kind, body in blocks)
+        + b"".join(
+            (
+                struct.pack("<HHIHH", kind, 12, len(body), len(body) // (16 if kind == 9 else 8), 0)
+                if kind in (9, 10)
+                else struct.pack("<HHI", kind, 8, len(body))
+            )
+            + body
+            for kind, body in blocks
+        )
         + digest
     )
 

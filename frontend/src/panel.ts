@@ -74,7 +74,13 @@ export class RoborockPanel extends LitElement {
   private draftRevision = "";
   private mapDraft?: MapSnapshot;
   private floorId?: number;
-  private confirmation?: { text: string; action: () => void };
+  private confirmation?: {
+    text: string;
+    action: () => void;
+    readonly?: boolean;
+  };
+  private uncertainRobots = new Set<string>();
+  private interactionRevision = "";
   private uncertain = false;
   private records: {
     id: number;
@@ -134,6 +140,7 @@ export class RoborockPanel extends LitElement {
       !!this.ha?.user?.is_admin &&
       !!this.data?.available &&
       !this.pending &&
+      !this.loading &&
       !this.uncertain
     );
   }
@@ -163,7 +170,7 @@ export class RoborockPanel extends LitElement {
       if (epoch === this.epoch) this.loading = false;
     }
   }
-  private async load() {
+  private async load(reconcile = false) {
     if (!this.ha || !this.entity) return;
     const epoch = ++this.epoch,
       id = this.entity;
@@ -175,7 +182,13 @@ export class RoborockPanel extends LitElement {
       if (epoch !== this.epoch) return;
       this.data = value;
       this.floorId = value.current_map ?? value.maps[0]?.id;
-      this.uncertain = false;
+      if (reconcile && value.available) {
+        this.uncertain = false;
+        this.uncertainRobots.delete(id);
+        this.error = "";
+        this.message = strings(this.ha).reconciled;
+        if (!this.mapDraft) this.draftRevision = value.revision;
+      }
       if (!this.dirty) this.draftRevision = value.revision;
       if (this.ha.connection) {
         const unsub = await this.ha.connection.subscribeMessage<Snapshot>(
@@ -185,6 +198,12 @@ export class RoborockPanel extends LitElement {
               s.entity_id === id &&
               s.api_version === 1
             ) {
+              if (this.data?.current_map !== s.current_map) {
+                this.selected = [];
+                this.points = [];
+                this.tool = "view";
+                this.interactionRevision = "";
+              }
               this.data = s;
               if (!this.dirty) this.draftRevision = s.revision;
             }
@@ -207,9 +226,9 @@ export class RoborockPanel extends LitElement {
     this.points = [];
     this.selected = [];
     this.tool = "view";
-    this.uncertain = false;
+    this.interactionRevision = "";
     this.draftRevision = this.data?.revision || "";
-    this.error = "";
+    this.error = this.uncertain ? strings(this.ha).unconfirmed : "";
     this.message = "";
   }
   private guard(action: () => void) {
@@ -220,6 +239,7 @@ export class RoborockPanel extends LitElement {
     }
     this.confirmation = {
       text: strings(this.ha).discardHelp,
+      readonly: true,
       action: () => {
         this.resetDraft();
         this.closeConfirmation();
@@ -263,20 +283,23 @@ export class RoborockPanel extends LitElement {
         params,
       );
       if (epoch !== this.epoch) return;
-      await this.handleResult(result);
+      await this.handleResult(result, operation);
     } catch {
       if (epoch === this.epoch) {
         this.error = strings(this.ha).unconfirmed;
         this.uncertain = true;
+        this.uncertainRobots.add(this.entity);
       }
     } finally {
       if (this.isConnected) this.pending = false;
     }
   }
-  private async handleResult(result: OperationResult) {
+  private async handleResult(result: OperationResult, operation: string) {
     const t = strings(this.ha);
     if (result.status === "confirmed") {
-      this.resetDraft();
+      if (operation === "settings_save") this.draft = {};
+      else if (operation === "room_display_save") this.roomName = "";
+      else if (operation === "map_restrictions_save") this.mapDraft = undefined;
       this.message = t.confirmed;
       this.closeConfirmation();
       if (this.data) this.data = { ...this.data, revision: result.revision };
@@ -303,7 +326,30 @@ export class RoborockPanel extends LitElement {
         : errorText(this.ha, result.error);
       if (result.status === "unconfirmed" || result.status === "pending") {
         this.uncertain = true;
+        this.uncertainRobots.add(this.entity);
         this.error = t.unconfirmed;
+        this.closeConfirmation();
+      }
+      if (operation === "settings_save" && result.completed_steps.length) {
+        await this.load();
+        this.draft = Object.fromEntries(
+          Object.entries(this.draft).filter(([id, desired]) => {
+            const field = this.data?.settings.find((f) => f.entity_id === id);
+            if (!field?.available) return true;
+            return field.kind === "number"
+              ? Number(field.value) !== Number(desired)
+              : field.value !== desired;
+          }),
+        );
+        if (!this.mapDraft)
+          this.draftRevision = this.data?.revision || this.draftRevision;
+        const names = Object.keys(this.draft).map(
+          (id) =>
+            this.data?.settings.find((f) => f.entity_id === id)?.name || id,
+        );
+        this.error =
+          (this.uncertain ? t.unconfirmed : t.partial) +
+          (names.length ? " " + t.remaining + " " + names.join(", ") : "");
       }
     }
   }
@@ -317,6 +363,7 @@ export class RoborockPanel extends LitElement {
   }
   private addPoint(point: Point) {
     if (!this.canAct) return;
+    if (!this.points.length) this.interactionRevision = this.data!.revision;
     this.points = this.points.length >= 2 ? [point] : [...this.points, point];
   }
   private addGeometry() {
@@ -361,7 +408,7 @@ export class RoborockPanel extends LitElement {
         void this.run(
           operation,
           { map_id: this.map!.id, ...params },
-          this.data!.revision,
+          this.interactionRevision || this.data!.revision,
         ),
     );
   }
@@ -369,11 +416,20 @@ export class RoborockPanel extends LitElement {
     return this.data?.capabilities[operation]?.status === "available";
   }
   private roomSelect(id: number) {
+    if (!this.selected.length) this.interactionRevision = this.data!.revision;
     this.selected = this.selected.includes(id)
       ? this.selected.filter((r) => r !== id)
       : [...this.selected, id];
   }
   private setting(field: Setting) {
+    if (field.kind === "button")
+      return html`<button
+        type="button"
+        ?disabled=${!field.available || !this.canAct}
+        @click=${() => void this.publicAction("button", "press", { entity_id: field.entity_id })}
+      >
+        ${field.name}
+      </button>`;
     const value = this.draft[field.entity_id] ?? field.value;
     return html`<label
       >${field.name}${field.unit ? html`<small>${field.unit}</small>` : nothing}${
@@ -460,6 +516,8 @@ export class RoborockPanel extends LitElement {
                   this.error = t.invalid;
                   return;
                 }
+                if (!this.points.length)
+                  this.interactionRevision = this.data!.revision;
                 const points = [...this.points];
                 points[i] = { ...(points[i] || { x: 0, y: 0 }), [axis]: value };
                 this.points = points;
@@ -541,8 +599,8 @@ export class RoborockPanel extends LitElement {
           <h2>${t.maps}</h2>
           <button
             type="button"
-            ?disabled=${!this.canAct}
-            @click=${() => this.guard(() => void this.run("map_refresh", {}, this.data!.revision))}
+            ?disabled=${this.pending || this.loading || !this.data?.available}
+            @click=${() => (this.uncertain ? void this.load(true) : void this.run("map_refresh", {}, this.data!.revision))}
           >
             ${t.refresh}
           </button>
@@ -591,7 +649,7 @@ export class RoborockPanel extends LitElement {
             <button
               type="button"
               ?disabled=${!this.canAct || !m?.active || !this.selected.length}
-              @click=${() => void this.publicAction("vacuum", "send_command", { entity_id: this.entity, command: "app_segment_clean", params: [{ segments: this.selected, repeat: 1 }] })}
+              @click=${() => void this.publicAction("vacuum", "clean_segments", { entity_id: this.entity, segment_ids: this.selected.map((id) => `${m!.id}_${id}`) })}
             >
               ${t.cleanRooms}
             </button>
@@ -599,6 +657,7 @@ export class RoborockPanel extends LitElement {
         </section>
         <section class="surface section">
           <h3>${t.advanced}</h3>
+          ${!this.cap("map_restrictions_save") && !this.cap("room_split") ? html`<p class="hint">${t.modelUnverified}</p>` : nothing}
           <label
             >${t.advanced}<select
               .value=${this.tool}
@@ -607,9 +666,9 @@ export class RoborockPanel extends LitElement {
                 this.points = [];
               }}
             >
-              ${(["view", "wall", "noGo", "split", "goTo", "zone"] as Tool[]).map((tool) => html`<option value=${tool} ?disabled=${!m?.active || (tool !== "view" && !m.calibration) || (["wall", "noGo"].includes(tool) && !this.cap("map_restrictions_save")) || (tool === "split" && !this.cap("room_split"))}>${t[tool as TextKey]}</option>`)}
+              ${(["view", "wall", "noGo", "split", "goTo", "zone"] as Tool[]).map((tool) => html`<option value=${tool} ?disabled=${!m?.active || (tool !== "view" && !m.calibration) || (["goTo", "zone"].includes(tool) && !this.cap(tool === "goTo" ? "map_goto" : "map_zone_clean")) || (["wall", "noGo"].includes(tool) && !this.cap("map_restrictions_save")) || (tool === "split" && !this.cap("room_split"))}>${t[tool as TextKey]}</option>`)}
             </select></label
-          >${this.restrictionsView()}${m?.edit_blocker ? html`<p class="hint">${t.preservation}</p>` : nothing}${this.tool === "wall" || this.tool === "noGo" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2} @click=${() => this.addGeometry()}>${t.add}</button>` : this.tool === "split" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2 || this.selected.length !== 1 || !this.cap("room_split")} @click=${() => this.mapOperation("room_split", { room_id: this.selected[0], line: [this.points[0].x, this.points[0].y, this.points[1].x, this.points[1].y] })}>${t.split}</button>` : this.tool === "goTo" ? html`<button type="button" ?disabled=${!this.canAct || !this.points.length || !m?.active} @click=${() => void this.publicAction("roborock", "set_vacuum_goto_position", { entity_id: this.entity, ...this.points[0] })}>${t.goTo}</button>` : this.tool === "zone" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2 || !m?.active} @click=${() => void this.publicAction("roborock", "set_vacuum_zoned_cleaning", { entity_id: this.entity, x1: Math.min(this.points[0].x, this.points[1].x), y1: Math.min(this.points[0].y, this.points[1].y), x2: Math.max(this.points[0].x, this.points[1].x), y2: Math.max(this.points[0].y, this.points[1].y), repeats: 0 })}>${t.zone}</button>` : nothing}
+          >${this.restrictionsView()}${m?.edit_blocker ? html`<p class="hint">${t.preservation}</p>` : nothing}${this.tool === "wall" || this.tool === "noGo" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2} @click=${() => this.addGeometry()}>${t.add}</button>` : this.tool === "split" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2 || this.selected.length !== 1 || !this.cap("room_split")} @click=${() => this.mapOperation("room_split", { room_id: this.selected[0], line: [this.points[0].x, this.points[0].y, this.points[1].x, this.points[1].y] })}>${t.split}</button>` : this.tool === "goTo" ? html`<button type="button" ?disabled=${!this.canAct || !this.points.length || !m?.active || !this.cap("map_goto")} @click=${() => void this.run("map_goto", { map_id: m!.id, ...this.points[0] }, this.interactionRevision)}>${t.goTo}</button>` : this.tool === "zone" ? html`<button type="button" ?disabled=${!this.canAct || this.points.length !== 2 || !m?.active || !this.cap("map_zone_clean")} @click=${() => void this.run("map_zone_clean", { map_id: m!.id, x1: Math.min(this.points[0].x, this.points[1].x), y1: Math.min(this.points[0].y, this.points[1].y), x2: Math.max(this.points[0].x, this.points[1].x), y2: Math.max(this.points[0].y, this.points[1].y), repeats: 1 }, this.interactionRevision)}>${t.zone}</button>` : nothing}
           <div class="actions">
             <button
               type="button"
@@ -696,7 +755,12 @@ export class RoborockPanel extends LitElement {
     service: string,
     data: Record<string, unknown>,
   ) {
-    if (!this.canAct || !this.ha || !this.map?.active) return;
+    if (
+      !this.canAct ||
+      !this.ha ||
+      (service === "clean_segments" && !this.map?.active)
+    )
+      return;
     this.pending = true;
     this.error = "";
     const epoch = this.epoch;
@@ -784,7 +848,10 @@ export class RoborockPanel extends LitElement {
                     value = el.value;
                   el.value = this.entity;
                   this.guard(() => {
+                    this.resetDraft();
                     this.entity = value;
+                    this.uncertain = this.uncertainRobots.has(value);
+                    this.floorId = undefined;
                     this.data = undefined;
                     this.records = [];
                     void this.load();
@@ -819,7 +886,7 @@ export class RoborockPanel extends LitElement {
       >
         ${this.error || (this.pending ? t.pending : this.message)}
       </div>
-      ${this.uncertain ? html`<button type="button" @click=${() => this.guard(() => void this.load())}>${t.refresh}</button>` : nothing}${
+      ${this.uncertain ? html`<button type="button" @click=${() => void this.load(true)}>${t.refresh}</button>` : nothing}${
         this.data
           ? this.tab === "settings"
             ? this.settingsView()
@@ -850,7 +917,7 @@ export class RoborockPanel extends LitElement {
           <button
             type="button"
             class="primary"
-            ?disabled=${this.pending || this.uncertain}
+            ?disabled=${this.pending || (this.uncertain && !this.confirmation?.readonly)}
             @click=${() => this.confirmation?.action()}
           >
             ${t.confirm}</button

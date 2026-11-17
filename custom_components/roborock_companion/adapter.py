@@ -26,23 +26,33 @@ class UnconfirmedError(AdapterError):
 
 
 class RoborockAdapter:
-    def __init__(self, hass, vacuum_entity_id: str):
+    def __init__(self, hass, vacuum_entity_id: str, expected_device_id=None):
         self.hass = hass
         self.entity_id = vacuum_entity_id
         self.generation = 0
         self.coordinator = None
         self.entry = None
         self._runtime = None
+        self._verified_live = None
         self._unsubs: list[Callable] = []
         self._listeners: list[Callable] = []
         self._parent_unsub = None
+        self._registry_unsub = None
+        self._registry_id = None
+        self._device_id = expected_device_id
+        self._entity_unique_id = None
         self.extra: dict[str, Any] = {}
 
     async def async_bind(self):
         await self.async_close()
-        entity = er.async_get(self.hass).async_get(self.entity_id)
+        entity = er.async_get(self.hass).async_get(self._registry_id or self.entity_id)
         if entity is None or entity.platform != "roborock" or entity.domain != "vacuum":
             raise AdapterError("invalid_binding")
+        if self._device_id is not None and entity.device_id != self._device_id:
+            raise AdapterError("binding_changed")
+        self.entity_id = entity.entity_id
+        self._registry_id, self._device_id = entity.id, entity.device_id
+        self._entity_unique_id = entity.unique_id
         entry = self.hass.config_entries.async_get_entry(entity.config_entry_id)
         device = dr.async_get(self.hass).async_get(entity.device_id) if entity.device_id else None
         runtime = getattr(entry, "runtime_data", None)
@@ -52,7 +62,10 @@ class RoborockAdapter:
         if not callable(values):
             raise AdapterError("incompatible_api")
         matches = [
-            c for c in values() if set(c.device_info.get("identifiers", ())) & device.identifiers
+            c
+            for c in values()
+            if set(c.device_info.get("identifiers", ())) & device.identifiers
+            and getattr(c, "duid_slug", None) == entity.unique_id
         ]
         if len(matches) != 1:
             raise AdapterError("invalid_binding")
@@ -63,6 +76,21 @@ class RoborockAdapter:
         self.entry, self._runtime, self.coordinator = entry, runtime, coordinator
         self._unsubs.append(coordinator.async_add_listener(self._notify))
         self._parent_unsub = entry.async_on_state_change(self._parent_changed)
+        self._registry_unsub = self.hass.bus.async_listen(
+            er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
+        )
+        self._notify()
+
+    @callback
+    def _registry_changed(self, event):
+        if self.entity_id not in (event.data.get("entity_id"), event.data.get("old_entity_id")):
+            return
+        entity = er.async_get(self.hass).async_get(self._registry_id)
+        if entity and entity.entity_id != self.entity_id and entity.device_id == self._device_id:
+            self._invalidate()
+            self.hass.async_create_task(self._async_rebind())
+        elif entity is None or entity.device_id != self._device_id:
+            self._invalidate()
         self._notify()
 
     @callback
@@ -76,6 +104,11 @@ class RoborockAdapter:
     async def _async_rebind(self):
         try:
             await self.async_bind()
+            companion = getattr(self, "companion_entry", None)
+            if companion and companion.data.get("entity_id") != self.entity_id:
+                self.hass.config_entries.async_update_entry(
+                    companion, data=dict(companion.data) | {"entity_id": self.entity_id}
+                )
         except AdapterError:
             self._notify()
 
@@ -87,6 +120,7 @@ class RoborockAdapter:
         self.coordinator = None
         self._runtime = None
         self.extra.clear()
+        self._verified_live = None
 
     def add_listener(self, callback):
         self._listeners.append(callback)
@@ -98,6 +132,9 @@ class RoborockAdapter:
 
     async def async_close(self):
         self._invalidate()
+        if self._registry_unsub:
+            self._registry_unsub()
+            self._registry_unsub = None
         if self._parent_unsub:
             self._parent_unsub()
             self._parent_unsub = None
@@ -112,6 +149,16 @@ class RoborockAdapter:
             or getattr(self.entry, "runtime_data", None) is not self._runtime
             or entity is None
             or entity.config_entry_id != self.entry.entry_id
+            or entity.id != self._registry_id
+            or entity.unique_id != self._entity_unique_id
+            or not any(c is self.coordinator for c in self._runtime.values())
+            or entity.device_id != self._device_id
+            or entity.platform != "roborock"
+            or not (
+                dr.async_get(self.hass).async_get(entity.device_id)
+                and set(self.coordinator.device_info.get("identifiers", ()))
+                & dr.async_get(self.hass).async_get(entity.device_id).identifiers
+            )
         ):
             raise AdapterError("binding_changed")
 
@@ -138,12 +185,40 @@ class RoborockAdapter:
             self.coordinator.properties_api.command.send(method, params=params),
             timeout=25,
         )
-        self.ensure_current()
-        if generation != self.generation:
-            raise AdapterError("binding_changed")
+        try:
+            self.ensure_current()
+            if generation != self.generation:
+                raise AdapterError("binding_changed")
+        except AdapterError as err:
+            raise UnconfirmedError("binding_changed") from err
         if isinstance(response, dict) and "error" in response:
             raise AdapterError("robot_rejected")
         return response
+
+    @property
+    def map_protocol(self):
+        from .capabilities import VERIFIED_MAP_PROTOCOLS
+
+        device = dr.async_get(self.hass).async_get(self._device_id) if self._device_id else None
+        return VERIFIED_MAP_PROTOCOLS.get((device.model, device.sw_version)) if device else None
+
+    def map_content(self, map_id):
+        """Use floor-keyed cache; a shared live trait has no floor identity."""
+        api = self.coordinator.properties_api
+        home = getattr(api, "home", None)
+        content = (getattr(home, "home_map_content", None) or {}).get(map_id)
+        observation = self._verified_live
+        if observation and observation[0] == self.generation and observation[1] == map_id:
+            infos = getattr(home, "home_map_info", None) or {}
+            live = getattr(api, "map_content", None)
+            if (
+                len(infos) == 1
+                and map_id in infos
+                and getattr(getattr(api, "maps", None), "current_map", None) == map_id
+                and getattr(live, "raw_api_response", None) == observation[2].raw_api_response
+            ):
+                return observation[2]
+        return content
 
     def get_snapshot(self):
         available = self.available
@@ -167,11 +242,7 @@ class RoborockAdapter:
             home = getattr(api, "home", None)
             current_map = getattr(getattr(api, "maps", None), "current_map", None)
             for map_id, info in list((getattr(home, "home_map_info", None) or {}).items())[:16]:
-                content = (getattr(home, "home_map_content", None) or {}).get(map_id)
-                # The current map trait can be newer than the home cache after explicit refresh.
-                live = getattr(api, "map_content", None)
-                if map_id == current_map and getattr(live, "map_data", None):
-                    content = live
+                content = self.map_content(map_id)
                 try:
                     item = convert_map(map_id, info, content)
                 except AttributeError, TypeError, ValueError, OverflowError:

@@ -44,7 +44,9 @@ class CompanionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 state = self.hass.states.get(entity_id)
                 name = state.name if state else entity_id
-                return self.async_create_entry(title=name, data={"entity_id": entity_id})
+                return self.async_create_entry(
+                    title=name, data={"entity_id": entity_id, "device_id": entity.device_id}
+                )
         return self.async_show_form(step_id="user", data_schema=binding_schema(), errors=errors)
 
 

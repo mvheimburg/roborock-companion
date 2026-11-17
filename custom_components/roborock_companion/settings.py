@@ -36,7 +36,7 @@ def get_settings(adapter):
     for entity in related_entities(adapter):
         domain = entity.domain
         state = adapter.hass.states.get(entity.entity_id)
-        if domain not in ("switch", "select", "number", "time") or state is None:
+        if domain not in ("switch", "select", "number", "time", "button") or state is None:
             continue
         attrs = state.attributes
         result.append(
@@ -45,7 +45,8 @@ def get_settings(adapter):
                 "kind": domain,
                 "name": state.name,
                 "value": state.state == "on" if domain == "switch" else state.state,
-                "available": state.state not in ("unknown", "unavailable"),
+                "available": state.state != "unavailable"
+                and (domain == "button" or state.state != "unknown"),
                 "options": list(attrs.get("options", [])),
                 "min": attrs.get("min"),
                 "max": attrs.get("max"),
@@ -73,6 +74,8 @@ def validate_changes(adapter, params):
             raise AdapterError("invalid_setting")
         field = fields[key]
         kind = field["kind"]
+        if kind == "button":
+            raise AdapterError("invalid_setting")
         if kind == "select" and value not in field["options"]:
             raise AdapterError("invalid_setting")
         if kind == "switch" and type(value) is not bool:

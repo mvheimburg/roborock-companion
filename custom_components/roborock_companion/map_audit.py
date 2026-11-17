@@ -32,13 +32,16 @@ def audit_map(encoded):
             if header < 8 or header > 1024 or length > LIMIT or offset + header + length > len(raw):
                 return failed
             blocks += 1
-            if blocks > 256 or kind not in KNOWN or (kind == 12 and length):
+            if blocks > 256 or kind not in KNOWN or kind in seen or (kind == 12 and length):
                 return failed
             if kind in (9, 10):
                 size = 16 if kind == 9 else 8
-                if length % size:
+                if header != 12 or length % size:
                     return failed
-                counts[kind] = length // size
+                count, flags = struct.unpack_from("<HH", raw, offset + 8)
+                if flags or count != length // size:
+                    return failed
+                counts[kind] = count
             seen.add(kind)
             offset += header + length
         if not {2, 1024} <= seen or offset != len(raw):

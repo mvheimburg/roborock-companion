@@ -321,3 +321,18 @@ Ved tilbakeføring følger du standardserverens dokumenterte Wi-Fi-reset og
 sammenkobling med den offisielle appen. Gjenopprett HA-backup/bindinger etter
 valgt migreringsmåte. Unngå å starte med fabrikknullstilling eller sletting av
 serverdata uten backup; det er ikke et vanlig vedlikeholdssteg.
+
+## Status for de nye HA-komponentene
+
+Førsteversjonen har Lovelace-kontroller, et stort konfigurasjonspanel med de
+innstillingene og dokk-knappene HA allerede eksponerer, kartvisning, lokale
+romvisningsnavn og historikk. Romrengjøring bruker HA sin etasjekvalifiserte
+handling. Punkt-/sonestyring krever ett lagret kart og kjent kalibrering.
+
+**Full LocalRock-paritet er ikke ferdig.** Fysisk kartredigering, deling/sammenslåing
+av rom, gulvmateriale, kartkopiering/gjenoppretting og kartlegging er sperret i
+førsteversjonen inntil et nøyaktig modell-/firmwareformat er verifisert. Det finnes
+ingen brukerbryter som omgår sperren. Tepper, terskler, SmartPlan, romrekkefølge,
+manuell kjøring og native tidsplanredigering er heller ikke ferdige funksjoner.
+Ingen nye kartkommandoer er prøvd på din Saros 20 Sonic. Standard lokalserver kan
+installeres uavhengig av disse begrensningene i vårt konfigurasjonspanel.

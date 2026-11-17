@@ -86,3 +86,42 @@ async def test_failed_coordinator_blocks_actions_on_retained_state(hass, adapter
     assert adapter.get_snapshot()["available"] is False
     with pytest.raises(AdapterError, match="unavailable"):
         await adapter.async_command("get_timer", [])
+
+
+async def test_registry_rename_recovers_exact_robot_identity(hass, adapter):
+    from homeassistant.helpers import entity_registry as er
+
+    original = adapter.coordinator
+    er.async_get(hass).async_update_entity(adapter.entity_id, new_entity_id="vacuum.renamed")
+    await hass.async_block_till_done()
+    assert adapter.entity_id == "vacuum.renamed"
+    assert adapter.coordinator is original
+
+
+async def test_persisted_device_binding_is_not_replaced_after_restart(hass, adapter):
+    from unittest.mock import patch
+
+    from homeassistant.exceptions import ConfigEntryNotReady
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.roborock_companion import async_setup_entry
+
+    companion = MockConfigEntry(
+        domain="roborock_companion",
+        unique_id=er.async_get(hass).async_get(adapter.entity_id).id,
+        data={"entity_id": adapter.entity_id, "device_id": "different-device"},
+    )
+    companion.add_to_hass(hass)
+    with (
+        patch("custom_components.roborock_companion.panel.async_register", new_callable=AsyncMock),
+        pytest.raises(ConfigEntryNotReady),
+    ):
+        await async_setup_entry(hass, companion)
+
+
+async def test_changed_registry_unique_id_cannot_rebind_old_connection(hass, adapter):
+    from homeassistant.helpers import entity_registry as er
+
+    er.async_get(hass).async_update_entity(adapter.entity_id, new_unique_id="other_robot")
+    with pytest.raises(AdapterError):
+        await adapter.async_bind()

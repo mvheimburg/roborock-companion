@@ -1,5 +1,6 @@
 """Serve the desktop/tablet configuration panel inside Home Assistant."""
 
+import hashlib
 from pathlib import Path
 
 from aiohttp import web
@@ -34,16 +35,12 @@ class MapView(HomeAssistantView):
             flag = int(map_id)
         except ValueError as err:
             raise web.HTTPNotFound() from err
-        api = adapter.coordinator.properties_api
-        home = getattr(api, "home", None)
-        content = (getattr(home, "home_map_content", None) or {}).get(flag)
-        if flag == getattr(getattr(api, "maps", None), "current_map", None):
-            live = getattr(api, "map_content", None)
-            if getattr(live, "image_content", None):
-                content = live
+        content = adapter.map_content(flag)
         image = getattr(content, "image_content", None)
         if not isinstance(image, bytes) or not 0 < len(image) <= 4 * 1024 * 1024:
             raise web.HTTPNotFound()
+        if request.query.get("v") != hashlib.sha256(image).hexdigest()[:16]:
+            raise web.HTTPConflict()
         return web.Response(
             body=image, content_type="image/png", headers={"Cache-Control": "private, no-store"}
         )
