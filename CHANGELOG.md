@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — 2026-11-17
+
+- Provide a dedicated Mosquitto container in the existing Docker support stack, with a private network, persistent volume and MQTT health dependency.
+- Document upstream external-broker configuration, migration from embedded mode and backup of broker data.
+
 ## 0.1.0 — 2026-11-17
 
 - Bind to the existing official Roborock integration without copying credentials or creating a second robot connection.

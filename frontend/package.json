@@ -1,6 +1,6 @@
 {
   "name": "roborock-companion-panel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Desktop map and robot configuration through Home Assistant.",
   "type": "module",
   "license": "MIT",

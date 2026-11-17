@@ -1,6 +1,6 @@
 [project]
 name = "roborock-companion"
-version = "0.1.0"
+version = "0.1.1"
 description = "Advanced Roborock configuration through Home Assistant's official integration."
 requires-python = ">=3.14"
 license = "MIT"

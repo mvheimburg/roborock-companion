@@ -32,7 +32,7 @@ actions, never values accepted by `settings_save`. Room cleaning uses public
 `vacuum.clean_segments` with `segment_ids:["<map_id>_<room_id>"]`.
 
 Physical map-writing operations additionally require an exact model/firmware
-protocol profile. **No profiles ship in 0.1.0**, so these writes are disabled.
+protocol profile. **No profiles ship in this release**, so these writes are disabled.
 Future verified profiles must still pass fresh status/map checks before and after
 opening an edit session, lossless-preservation checks, and cleanup acknowledgement.
 The captured bulk replacement path is restricted to a single map at index 0.
