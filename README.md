@@ -125,7 +125,7 @@ Protocol and safeguards are informed by the MIT-licensed
 [python-roborock](https://github.com/Python-roborock/python-roborock) projects.
 This project is independent of Roborock. See [API v1](docs/api-v1.md).
 
-Repository metadata, once `gh` is authenticated:
+Repository description and topics are configured. Maintenance command:
 
 ```bash
 gh repo edit mvheimburg/roborock-companion --description "Advanced Roborock configuration, map tools and controls through Home Assistant's official Roborock integration." --add-topic home-assistant --add-topic homeassistant --add-topic hacs --add-topic hacs-integration --add-topic roborock --add-topic robot-vacuum

@@ -1,5 +1,6 @@
 # Merge this service into an existing Docker Compose / Portainer standalone stack.
 # Build the unmodified upstream v1.2.1 image first; see README.nb.md.
+# Mosquitto runs inside this container in embedded mode; only MQTT/TLS 8881 is published.
 services:
   roborock-local-server:
     image: local/roborock-local-server:1.2.1

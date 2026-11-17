@@ -8,6 +8,27 @@ Roborock-serveren blir en egen Compose-tjeneste med innebygd MQTT og egne data.
 Ikke koble den til Music Assistant sin konfigurasjon eller en eksisterende MQTT-
 broker for første installasjon. Dette er standard upstream-server, ikke en fork.
 
+MQTT har ingen separat tjeneste i Compose fordi **Mosquitto kjører inne i samme
+container** som lokalserveren. Docker-imaget installerer Mosquitto, og serveren
+starter prosessen når `config.toml` har denne modusen:
+
+```toml
+[broker]
+mode = "embedded"
+host = "127.0.0.1"
+port = 18830
+```
+
+Dette er felter i den genererte `config.toml`, ikke Compose-miljøvariabler. Behold
+resten av konfigurasjonen fra veiviseren. `18830` er en intern brokerport som ikke
+skal publiseres. Robot og HA bruker serverens MQTT/TLS-endepunkt på **8881**;
+serveren formidler trafikken videre til Mosquitto. Det trengs ingen ekstra
+Mosquitto-container og ingen kobling til HA sin vanlige MQTT-broker.
+
+Kilde: [Dockerfile v1.2.1](https://github.com/Python-roborock/local_roborock_server/blob/v1.2.1/Dockerfile),
+[oppstart av innebygd broker](https://github.com/Python-roborock/local_roborock_server/blob/v1.2.1/src/roborock_local_server/server.py#L1900)
+og [konfigurasjonsstandarder](https://github.com/Python-roborock/local_roborock_server/blob/v1.2.1/src/roborock_local_server/config.py#L226).
+
 1. På Docker-serveren: velg en varig katalog, for eksempel
    `/srv/roborock-local-server`, og installer `uv` etter upstream-veiledningen.
    Klon standardserverens utgitte kildekode til katalogen:
