@@ -1,0 +1,28 @@
+{
+  "title": "Roborock Companion",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Choose Roborock",
+        "description": "Choose a robot from the existing Roborock integration.",
+        "data": {
+          "entity_id": "Robot"
+        }
+      }
+    },
+    "error": {
+      "invalid_binding": "Choose a vacuum from the Roborock integration."
+    },
+    "abort": {
+      "already_configured": "This robot is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Roborock settings",
+        "description": "Open the [configuration panel]({panel_url}) for maps, rooms and settings. Changes are saved only when you choose Save."
+      }
+    }
+  }
+}

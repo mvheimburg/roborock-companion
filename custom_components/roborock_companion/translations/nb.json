@@ -1,0 +1,28 @@
+{
+  "title": "Roborock Companion",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Velg Roborock",
+        "description": "Velg roboten fra den eksisterende Roborock-integrasjonen.",
+        "data": {
+          "entity_id": "Robot"
+        }
+      }
+    },
+    "error": {
+      "invalid_binding": "Velg en robot fra Roborock-integrasjonen."
+    },
+    "abort": {
+      "already_configured": "Roboten er allerede konfigurert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Roborock-innstillinger",
+        "description": "Åpne [konfigurasjonssiden]({panel_url}) for kart, rom og innstillinger. Endringer lagres bare når du velger Lagre."
+      }
+    }
+  }
+}
